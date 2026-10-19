@@ -1,0 +1,109 @@
+name: openbao-ssh-ca
+
+x-openbao-image: &openbao-image openbao/openbao:2.7.1
+
+services:
+  # One-shot: creates the static auto-unseal key in ./secrets/unseal if it doesn't exist yet.
+  openbao-keygen:
+    image: *openbao-image
+    entrypoint: ["/bin/sh", "/keygen.sh"]
+    volumes:
+      - ./openbao/keygen.sh:/keygen.sh:ro
+      - ./secrets/unseal:/openbao/secrets
+    restart: "no"
+
+  # OpenBao acting as the SSH certificate authority.
+  # Persistent file storage, auto-unsealed on every start with the static key.
+  openbao:
+    image: *openbao-image
+    command: ["server"]
+    environment:
+      # Config is mounted read-only; the data volume already belongs to the openbao user
+      SKIP_CHOWN: "true"
+    cap_add:
+      - IPC_LOCK
+    ports:
+      - "8200:8200"
+    volumes:
+      - ./openbao/config:/openbao/config:ro
+      - ./secrets/unseal:/openbao/secrets:ro
+      - openbao-data:/openbao/file
+    healthcheck:
+      # 0 = unsealed, 2 = sealed/uninitialized; both mean the API is up
+      test: ["CMD-SHELL", "bao status -address=http://127.0.0.1:8200 >/dev/null; [ $$? -ne 1 ]"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    depends_on:
+      openbao-keygen:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # One-shot: initializes OpenBao on first start, writes root token + recovery key to ./secrets/init.json.
+  openbao-init:
+    image: *openbao-image
+    entrypoint: ["/bin/sh", "/init.sh"]
+    environment:
+      BAO_ADDR: http://openbao:8200
+    volumes:
+      - ./openbao/init.sh:/init.sh:ro
+      - ./secrets:/openbao/secrets
+    depends_on:
+      openbao:
+        condition: service_healthy
+    restart: "no"
+
+  # One-shot: OpenTofu configures the SSH secrets engine, CA, role and policy.
+  tofu:
+    image: ghcr.io/opentofu/opentofu:1.13.1
+    working_dir: /tofu
+    entrypoint: ["/bin/sh", "-c", "tofu init -input=false && tofu apply -input=false -auto-approve"]
+    volumes:
+      - ./tofu:/tofu  # writable so tofu can create .terraform.lock.hcl
+      - ./secrets:/secrets:ro
+      - tofu-state:/state
+      - tofu-cache:/tofu-cache
+    environment:
+      TF_DATA_DIR: /tofu-cache/.terraform
+      TF_PLUGIN_CACHE_DIR: /tofu-cache/plugins
+    depends_on:
+      openbao-init:
+        condition: service_completed_successfully
+    restart: "no"
+
+  # Oracle Linux SSH server that trusts certificates signed by the OpenBao CA.
+  # sshd logs (incl. certificate key ID / serial) go through rsyslog to /var/log/secure.
+  ssh-target:
+    build: ./ssh-target
+    hostname: ssh-target
+    environment:
+      BAO_ADDR: http://openbao:8200
+      SSH_CA_MOUNT: ssh-client-signer
+    ports:
+      - "2222:22"
+    depends_on:
+      tofu:
+        condition: service_completed_successfully
+
+  # Demo client: generates a key pair, has OpenBao sign it, and logs in to ssh-target.
+  # Run with: docker compose run --rm ssh-client
+  ssh-client:
+    build: ./client
+    profiles: ["demo"]
+    environment:
+      BAO_ADDR: http://openbao:8200
+      BAO_INIT_FILE: /secrets/init.json
+      SSH_CA_MOUNT: ssh-client-signer
+      SSH_ROLE: demo
+      SSH_USER: demo
+      SSH_HOST: ssh-target
+    volumes:
+      - ./secrets:/secrets:ro
+    depends_on:
+      ssh-target:
+        condition: service_started
+
+volumes:
+  openbao-data:
+  tofu-state:
+  tofu-cache:

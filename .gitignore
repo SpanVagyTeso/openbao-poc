@@ -1,0 +1,3 @@
+# Unseal key, root token and recovery key - never commit
+/secrets/*
+!/secrets/.gitkeep
