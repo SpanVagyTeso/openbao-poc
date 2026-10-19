@@ -1,3 +1,38 @@
+variables:
+  BAO_ADDR: http://openbao:8200
+  BAO_JWT_ROLE: gitlab-ssh
+  SSH_CA_MOUNT: ssh-client-signer
+  SSH_ROLE: demo
+  SSH_USER: demo
+  SSH_HOST: ssh-target
+
 hello-world:
   script:
     - echo "hello world with gitlab runner"
+
+# Logs in to OpenBao with the job's id_token. OpenBao only accepts it when the pipeline was started by
+# fodor.kristof@microsec.hu; then it signs a fresh SSH key, which is used to log in to ssh-target.
+ssh-certificate:
+  id_tokens:
+    OPENBAO_ID_TOKEN:
+      aud: openbao
+  script:
+    - echo "Pipeline started by ${GITLAB_USER_EMAIL}"
+    - |
+      login=$(jq -n --arg role "${BAO_JWT_ROLE}" --arg jwt "${OPENBAO_ID_TOKEN}" '{role: $role, jwt: $jwt}' |
+        curl -sS -X POST --data @- "${BAO_ADDR}/v1/auth/jwt/login")
+      BAO_TOKEN=$(jq -r '.auth.client_token // empty' <<<"${login}")
+      if [ -z "${BAO_TOKEN}" ]; then
+        echo "OpenBao rejected the id_token: $(jq -c '.errors' <<<"${login}")"
+        exit 1
+      fi
+      echo "Logged in to OpenBao, policies: $(jq -c '.auth.policies' <<<"${login}")"
+    - ssh-keygen -q -t ed25519 -N '' -C "gitlab-job-${CI_JOB_ID}" -f id_ed25519
+    - |
+      jq -n --arg key "$(cat id_ed25519.pub)" --arg user "${SSH_USER}" '{public_key: $key, valid_principals: $user}' |
+        curl -sSf -H "X-Vault-Token: ${BAO_TOKEN}" -X POST --data @- \
+          "${BAO_ADDR}/v1/${SSH_CA_MOUNT}/sign/${SSH_ROLE}" |
+        jq -j .data.signed_key > id_ed25519-cert.pub
+    - ssh-keygen -L -f id_ed25519-cert.pub
+    - ssh -i id_ed25519 -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null
+        "${SSH_USER}@${SSH_HOST}" 'echo "logged in to $(uname -n) as $(id -un)"'

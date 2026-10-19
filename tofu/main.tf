@@ -60,6 +60,29 @@ resource "vault_policy" "ssh_sign_demo" {
   EOT
 }
 
+# GitLab CI jobs log in with their id_token; signatures are checked against GitLab's public keys
+resource "vault_jwt_auth_backend" "gitlab" {
+  path         = "jwt"
+  type         = "jwt"
+  description  = "GitLab CI id_tokens"
+  jwks_url     = var.gitlab_jwks_url
+  bound_issuer = var.gitlab_issuer
+}
+
+# Only pipelines started by an allowed GitLab user get a token that may sign SSH keys
+resource "vault_jwt_auth_backend_role" "gitlab_ssh" {
+  backend         = vault_jwt_auth_backend.gitlab.path
+  role_name       = "gitlab-ssh"
+  role_type       = "jwt"
+  bound_audiences = [var.gitlab_audience]
+  user_claim      = "user_email"
+  bound_claims = {
+    user_email = join(",", var.gitlab_allowed_emails)
+  }
+  token_policies = [vault_policy.ssh_sign_demo.name]
+  token_ttl      = 300
+}
+
 output "ssh_ca_public_key" {
   value = vault_ssh_secret_backend_ca.ca.public_key
 }

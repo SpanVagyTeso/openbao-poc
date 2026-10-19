@@ -73,6 +73,9 @@ services:
     depends_on:
       openbao-init:
         condition: service_completed_successfully
+      # OpenBao checks GitLab's id_token signing keys (JWKS URL) when the JWT auth method is configured
+      gitlab:
+        condition: service_healthy
     restart: "no"
 
   # Oracle Linux SSH server that trusts certificates signed by the OpenBao CA.
