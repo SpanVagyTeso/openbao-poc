@@ -1,5 +1,9 @@
 name: openbao-ssh-ca
 
+include:
+  # GitLab CE + runner + hello-world project
+  - gitlab/compose.yaml
+
 x-openbao-image: &openbao-image openbao/openbao:2.7.1
 
 services:

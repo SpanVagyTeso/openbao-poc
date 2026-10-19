@@ -3,3 +3,5 @@
 Dockerfile text eol=lf
 *.tf   text eol=lf
 *.hcl  text eol=lf
+*.rb   text eol=lf
+*.tftpl text eol=lf

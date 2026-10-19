@@ -1,0 +1,87 @@
+# GitLab CE with a shell-executor runner and a hello-world project.
+# Included from ../compose.yaml; relative paths resolve against this directory.
+
+services:
+  # One-shot: creates the GitLab root password and root API token in ../secrets/gitlab if they don't exist yet.
+  gitlab-keygen:
+    image: alpine:3.22
+    entrypoint: ["/bin/sh", "/keygen.sh"]
+    volumes:
+      - ./keygen.sh:/keygen.sh:ro
+      - ../secrets/gitlab:/secrets
+    restart: "no"
+
+  # GitLab CE, web UI on http://localhost:8929 (user root, password in secrets/gitlab/root-password).
+  # After every reconfigure, seed-token.rb registers the root token so OpenTofu can use the API.
+  gitlab:
+    image: gitlab/gitlab-ce:19.4.1-ce.0
+    hostname: gitlab
+    shm_size: 256m
+    environment:
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'http://localhost:8929'
+        gitlab_rails['initial_root_password'] = File.read('/secrets/root-password').strip
+        gitlab_sshd['enable'] = false
+        # Keep the footprint small for a local demo
+        puma['worker_processes'] = 0
+        sidekiq['concurrency'] = 10
+        prometheus_monitoring['enable'] = false
+      GITLAB_POST_RECONFIGURE_SCRIPT: >-
+        gitlab-rails runner /seed-token.rb &&
+        touch /var/opt/gitlab/.token-seeded
+    ports:
+      - "8929:8929"
+    volumes:
+      - ./seed-token.rb:/seed-token.rb:ro
+      - ../secrets/gitlab:/secrets:ro
+      - gitlab-config:/etc/gitlab
+      - gitlab-logs:/var/log/gitlab
+      - gitlab-data:/var/opt/gitlab
+    healthcheck:
+      # Healthy once GitLab answers and the root token has been seeded
+      test: ["CMD-SHELL", "/opt/gitlab/bin/gitlab-healthcheck --fail --max-time 10 && test -f /var/opt/gitlab/.token-seeded"]
+      interval: 10s
+      timeout: 15s
+      retries: 60
+      start_period: 5m
+    depends_on:
+      gitlab-keygen:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # One-shot: OpenTofu creates the runner, writes its config.toml, and creates the hello-world project.
+  gitlab-tofu:
+    image: ghcr.io/opentofu/opentofu:1.13.1
+    working_dir: /tofu
+    entrypoint: ["/bin/sh", "-c", "tofu init -input=false && tofu apply -input=false -auto-approve"]
+    volumes:
+      - ./tofu:/tofu  # writable so tofu can create .terraform.lock.hcl
+      - ../secrets/gitlab:/secrets:ro
+      - gitlab-tofu-state:/state
+      - gitlab-tofu-cache:/tofu-cache
+      - gitlab-runner-config:/runner-config
+    environment:
+      TF_DATA_DIR: /tofu-cache/.terraform
+      TF_PLUGIN_CACHE_DIR: /tofu-cache/plugins
+    depends_on:
+      gitlab:
+        condition: service_healthy
+    restart: "no"
+
+  # GitLab Runner with the shell executor: jobs run inside this container as the gitlab-runner user.
+  gitlab-runner:
+    image: gitlab/gitlab-runner:ubuntu-v19.4.1
+    volumes:
+      - gitlab-runner-config:/etc/gitlab-runner
+    depends_on:
+      gitlab-tofu:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  gitlab-config:
+  gitlab-logs:
+  gitlab-data:
+  gitlab-tofu-state:
+  gitlab-tofu-cache:
+  gitlab-runner-config:
