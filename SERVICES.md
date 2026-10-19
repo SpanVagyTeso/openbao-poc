@@ -56,17 +56,7 @@ Oracle Linux sshd that only accepts certificates signed by the OpenBao CA. There
 - **Address:** `localhost:2222`
 - **Users:** `fodor.kristof` and `other-user`. A certificate only works for the user it was issued to:
   OpenBao only puts that user in it, and sshd requires the certificate's principal to match the login name.
-- **Connect from Windows:** `.\connect.ps1`. It generates a key, has OpenBao sign it with the root token,
-  and logs in.
-
-  ```powershell
-  .\connect.ps1                       # interactive shell as fodor.kristof
-  .\connect.ps1 -User other-user      # as other-user
-  .\connect.ps1 -Ttl 15m              # longer certificate lifetime (max 30m)
-  .\connect.ps1 -Command 'id'         # run a single command
-  .\connect.ps1 -ResetHostKey         # after ssh-target was recreated
-  ```
-
+- **Connect:** through GitLab CI, see [SSH certificates from GitLab CI](#ssh-certificates-from-gitlab-ci).
 - **Logs:** `docker compose logs -f ssh-target` (sshd logs, including the certificate key ID and serial)
 
 ## GitLab
