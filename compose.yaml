@@ -94,6 +94,7 @@ services:
 
   # Demo client: generates a key pair, has OpenBao sign it, and logs in to ssh-target.
   # Run with: docker compose run --rm ssh-client
+  # As another user: docker compose run --rm -e SSH_USER=other-user -e SSH_ROLE=other-user ssh-client
   ssh-client:
     build: ./client
     profiles: ["demo"]
@@ -101,8 +102,9 @@ services:
       BAO_ADDR: http://openbao:8200
       BAO_INIT_FILE: /secrets/init.json
       SSH_CA_MOUNT: ssh-client-signer
-      SSH_ROLE: demo
-      SSH_USER: demo
+      # Each user has an SSH role of the same name that only signs for them
+      SSH_ROLE: fodor.kristof
+      SSH_USER: fodor.kristof
       SSH_HOST: ssh-target
     volumes:
       - ./secrets:/secrets:ro

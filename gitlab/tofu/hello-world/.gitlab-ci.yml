@@ -1,29 +1,32 @@
 variables:
   BAO_ADDR: http://openbao:8200
-  BAO_JWT_ROLE: gitlab-ssh
   SSH_CA_MOUNT: ssh-client-signer
-  SSH_ROLE: demo
-  SSH_USER: demo
   SSH_HOST: ssh-target
+  # Everything is per user: the OpenBao JWT role, the SSH role and the login on ssh-target are all named
+  # after the GitLab user who started the pipeline
+  BAO_JWT_ROLE: $GITLAB_USER_LOGIN
+  SSH_ROLE: $GITLAB_USER_LOGIN
+  SSH_USER: $GITLAB_USER_LOGIN
 
 hello-world:
   script:
     - echo "hello world with gitlab runner"
 
-# Logs in to OpenBao with the job's id_token. OpenBao only accepts it when the pipeline was started by
-# fodor.kristof@microsec.hu; then it signs a fresh SSH key, which is used to log in to ssh-target.
+# Logs in to OpenBao with the job's id_token, using the JWT role named after the pipeline's user.
+# OpenBao only accepts it when the token's user_login and user_email belong to that role, and then
+# only signs a fresh SSH key for that user's own login on ssh-target.
 ssh-certificate:
   id_tokens:
     OPENBAO_ID_TOKEN:
       aud: openbao
   script:
-    - echo "Pipeline started by ${GITLAB_USER_EMAIL}"
+    - echo "Pipeline started by ${GITLAB_USER_LOGIN} (${GITLAB_USER_EMAIL})"
     - |
       login=$(jq -n --arg role "${BAO_JWT_ROLE}" --arg jwt "${OPENBAO_ID_TOKEN}" '{role: $role, jwt: $jwt}' |
         curl -sS -X POST --data @- "${BAO_ADDR}/v1/auth/jwt/login")
       BAO_TOKEN=$(jq -r '.auth.client_token // empty' <<<"${login}")
       if [ -z "${BAO_TOKEN}" ]; then
-        echo "OpenBao rejected the id_token: $(jq -c '.errors' <<<"${login}")"
+        echo "OpenBao rejected the id_token for role ${BAO_JWT_ROLE}: $(jq -c '.errors' <<<"${login}")"
         exit 1
       fi
       echo "Logged in to OpenBao, policies: $(jq -c '.auth.policies' <<<"${login}")"

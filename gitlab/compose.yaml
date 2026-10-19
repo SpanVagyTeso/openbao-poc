@@ -28,9 +28,12 @@ services:
         prometheus_monitoring['enable'] = false
       GITLAB_POST_RECONFIGURE_SCRIPT: >-
         gitlab-rails runner /seed.rb &&
-        touch /var/opt/gitlab/.seeded
+        touch /run/seed/done
     ports:
       - "8929:8929"
+    # Empty on every container start, so the healthcheck waits for this start's seed.rb run
+    tmpfs:
+      - /run/seed
     volumes:
       - ./seed.rb:/seed.rb:ro
       - ../secrets/gitlab:/secrets:ro
@@ -38,8 +41,8 @@ services:
       - gitlab-logs:/var/log/gitlab
       - gitlab-data:/var/opt/gitlab
     healthcheck:
-      # Healthy once GitLab answers and seed.rb has run
-      test: ["CMD-SHELL", "/opt/gitlab/bin/gitlab-healthcheck --fail --max-time 10 && test -f /var/opt/gitlab/.seeded"]
+      # Healthy once GitLab answers and seed.rb has run since this container started
+      test: ["CMD-SHELL", "/opt/gitlab/bin/gitlab-healthcheck --fail --max-time 10 && test -f /run/seed/done"]
       interval: 10s
       timeout: 15s
       retries: 60

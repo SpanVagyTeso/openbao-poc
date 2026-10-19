@@ -44,8 +44,15 @@ variable "gitlab_audience" {
   default     = "openbao"
 }
 
-variable "gitlab_allowed_emails" {
-  description = "GitLab users whose pipelines may get SSH certificates"
-  type        = list(string)
-  default     = ["fodor.kristof@microsec.hu"]
+variable "ssh_users" {
+  description = <<-EOT
+    Users who may get SSH certificates, as Linux/GitLab username => GitLab email.
+    Each user can only get a certificate for their own login on ssh-target.
+    New users also need an account in ssh-target/Dockerfile and gitlab/seed.rb.
+  EOT
+  type        = map(string)
+  default = {
+    "fodor.kristof" = "fodor.kristof@microsec.hu"
+    "other-user"    = "other-user@microsec.hu"
+  }
 }

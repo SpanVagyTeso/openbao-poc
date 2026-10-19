@@ -24,11 +24,13 @@ else
 end
 
 # --- Demo users ---
-# OpenBao only signs SSH keys for fodor.kristof; unknown shows that everyone else is rejected
+# OpenBao signs SSH keys for fodor.kristof and other-user, each only for their own login on ssh-target;
+# unknown shows that everyone else is rejected
 # GitLab rejects passwords shorter than 8 characters at login, even if they were stored
 DEMO_PASSWORD = 'almaalma'
 DEMO_USERS = [
   { username: 'fodor.kristof', name: 'Fodor Kristóf', email: 'fodor.kristof@microsec.hu' },
+  { username: 'other-user', name: 'Other User', email: 'other-user@microsec.hu' },
   { username: 'unknown', name: 'Unknown User', email: 'unknown@microsec.hu' }
 ].freeze
 

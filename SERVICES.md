@@ -16,7 +16,7 @@ All credentials are generated on first start into `secrets/` (git-ignored).
 | Service       | From your machine                        | Inside the compose network | Credentials                                          |
 |---------------|------------------------------------------|----------------------------|------------------------------------------------------|
 | OpenBao       | http://localhost:8200 (UI: `/ui`)        | `http://openbao:8200`      | Root token: `root_token` in `secrets/init.json`      |
-| SSH target    | `ssh -p 2222 demo@localhost`             | `ssh-target:22`            | SSH certificate signed by OpenBao (see below)        |
+| SSH target    | `localhost:2222` (`fodor.kristof`, `other-user`) | `ssh-target:22`            | SSH certificate signed by OpenBao (see below)        |
 | GitLab        | http://localhost:8929                    | `http://gitlab:8929`       | User `root`, password in `secrets/gitlab/root-password`; demo users below |
 | GitLab Runner | no port, check in GitLab                 | -                          | Registered automatically by `gitlab-tofu`            |
 
@@ -37,37 +37,51 @@ they finish and have no endpoint. Their output is in `docker compose logs <servi
 - **Files in `secrets/`:**
   - `init.json`: root token and recovery key
   - `unseal/unseal.key`: static auto-unseal key, keep it safe
-- **Configured by OpenTofu (`tofu/`):** SSH CA mount `ssh-client-signer`, role `demo`, policy `ssh-sign-demo`,
-  and JWT auth method `jwt` with role `gitlab-ssh` for GitLab CI (see
-  [SSH certificates from GitLab CI](#ssh-certificates-from-gitlab-ci)).
+- **Configured by OpenTofu (`tofu/`):** SSH CA mount `ssh-client-signer` and JWT auth method `jwt`, plus for
+  each user in `ssh_users` (`tofu/variables.tf`), all named after the user:
+
+  | What                | `fodor.kristof`                       | `other-user`                       |
+  |---------------------|---------------------------------------|------------------------------------|
+  | SSH role            | `ssh-client-signer/roles/fodor.kristof` | `ssh-client-signer/roles/other-user` |
+  | Policy              | `ssh-sign-fodor.kristof`              | `ssh-sign-other-user`              |
+  | JWT role (GitLab CI) | `auth/jwt/role/fodor.kristof`        | `auth/jwt/role/other-user`         |
+
+  Each SSH role only signs certificates for its own user, and each policy only allows its own SSH role.
+  See [SSH certificates from GitLab CI](#ssh-certificates-from-gitlab-ci).
 
 ## SSH target
 
 Oracle Linux sshd that only accepts certificates signed by the OpenBao CA. There is no password login.
 
-- **Address:** `localhost:2222`, user `demo`
-- **Connect from Windows:** `.\connect.ps1`. It generates a key, has OpenBao sign it, and logs in.
+- **Address:** `localhost:2222`
+- **Users:** `fodor.kristof` and `other-user`. A certificate only works for the user it was issued to:
+  OpenBao only puts that user in it, and sshd requires the certificate's principal to match the login name.
+- **Connect from Windows:** `.\connect.ps1`. It generates a key, has OpenBao sign it with the root token,
+  and logs in.
 
   ```powershell
-  .\connect.ps1                       # interactive shell
+  .\connect.ps1                       # interactive shell as fodor.kristof
+  .\connect.ps1 -User other-user      # as other-user
   .\connect.ps1 -Ttl 15m              # longer certificate lifetime (max 30m)
   .\connect.ps1 -Command 'id'         # run a single command
   .\connect.ps1 -ResetHostKey         # after ssh-target was recreated
   ```
 
-- **Connect from a container:** `docker compose run --rm ssh-client`
+- **Connect from a container:** `docker compose run --rm ssh-client` (as fodor.kristof), or
+  `docker compose run --rm -e SSH_USER=other-user -e SSH_ROLE=other-user ssh-client`
 - **Logs:** `docker compose logs -f ssh-target` (sshd logs, including the certificate key ID and serial)
 
 ## GitLab
 
 - **Web UI:** http://localhost:8929, user `root`, password in `secrets/gitlab/root-password`
-- **Demo users:** both are Maintainers of `root/hello-world`, so GitLab treats them the same.
+- **Demo users:** all are Maintainers of `root/hello-world`, so GitLab treats them the same.
   Only OpenBao tells them apart.
 
-  | Username        | Email                       | Password | Gets an SSH certificate from OpenBao? |
-  |-----------------|-----------------------------|----------|---------------------------------------|
-  | `fodor.kristof` | fodor.kristof@microsec.hu   | `almaalma` | yes                                 |
-  | `unknown`       | unknown@microsec.hu         | `almaalma` | no, OpenBao rejects the login        |
+  | Username        | Email                       | Password   | SSH certificate from OpenBao             |
+  |-----------------|-----------------------------|------------|------------------------------------------|
+  | `fodor.kristof` | fodor.kristof@microsec.hu   | `almaalma` | only for `fodor.kristof` on ssh-target   |
+  | `other-user`    | other-user@microsec.hu      | `almaalma` | only for `other-user` on ssh-target      |
+  | `unknown`       | unknown@microsec.hu         | `almaalma` | none, OpenBao rejects the login          |
 
   You can sign in with the username or the email. GitLab refuses passwords shorter than 8 characters at
   login, so `alma` can't be used. `gitlab/seed.rb` sets the password directly in Rails, because the API
@@ -97,16 +111,21 @@ executor inside its container.
 The `ssh-certificate` job in `root/hello-world` shows the whole flow:
 
 1. GitLab issues the job an `id_token` (`OPENBAO_ID_TOKEN`) with `aud: openbao`. It is a JWT signed by GitLab
-   that includes, among other claims, the email of the user who started the pipeline (`user_email`).
-2. The job logs in to OpenBao at `http://openbao:8200/v1/auth/jwt/login` with role `gitlab-ssh`.
-   OpenBao checks the signature against GitLab's keys (`http://gitlab:8929/oauth/discovery/keys`), the issuer
-   `http://localhost:8929`, the audience `openbao`, and requires `user_email = fodor.kristof@microsec.hu`.
-3. If the login succeeds, OpenBao returns a token with policy `ssh-sign-demo`. The job uses it to sign a fresh
-   SSH key (`ssh-client-signer/sign/demo`) and logs in to `ssh-target` as `demo` with the certificate.
-4. For any other user, the login fails with `claim "user_email" does not match any associated bound claim values`
-   and the job fails.
+   that includes, among other claims, the login and email of the user who started the pipeline
+   (`user_login`, `user_email`).
+2. The job logs in to OpenBao at `http://openbao:8200/v1/auth/jwt/login` with the JWT role named after that
+   user (`$GITLAB_USER_LOGIN`). OpenBao checks the signature against GitLab's keys
+   (`http://gitlab:8929/oauth/discovery/keys`), the issuer `http://localhost:8929`, the audience `openbao`, and
+   that `user_login` and `user_email` belong to that role. Picking someone else's role doesn't help, because
+   the claims in the token wouldn't match.
+3. If the login succeeds, OpenBao returns a token with only that user's policy (e.g. `ssh-sign-other-user`).
+   The job uses it to sign a fresh SSH key with the user's own SSH role and logs in to `ssh-target` as that user.
+   Signing with another user's role is denied (403), and so is asking for another login in the certificate.
+4. For a user without a role (`unknown`), the login fails with `role "unknown" could not be found` and the
+   job fails.
 
-The first pipeline is committed as `fodor.kristof`, so it succeeds. To see the rejection, sign in as `unknown`,
-open http://localhost:8929/root/hello-world/-/pipelines/new and run a pipeline on `main`.
+The first pipeline is committed as `fodor.kristof`, so it logs in as `fodor.kristof`. To try the others, sign in
+as `other-user` or `unknown`, open http://localhost:8929/root/hello-world/-/pipelines/new and run a pipeline on
+`main`.
 
-The allowed users are set by `gitlab_allowed_emails` in `tofu/variables.tf`.
+To add a user, add them to `ssh_users` in `tofu/variables.tf`, `ssh-target/Dockerfile` and `gitlab/seed.rb`.

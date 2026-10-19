@@ -4,6 +4,7 @@
 
 .EXAMPLE
     .\connect.ps1
+    .\connect.ps1 -User other-user
     .\connect.ps1 -Ttl 15m
     .\connect.ps1 -Command 'id; uname -n'
 #>
@@ -13,8 +14,9 @@ param(
     # Defaults to the root token from secrets\init.json
     [string]$BaoToken = $env:BAO_TOKEN,
     [string]$Mount    = 'ssh-client-signer',
-    [string]$Role     = 'demo',
-    [string]$User     = 'demo',
+    # Login on ssh-target; each user has an SSH role of the same name that only signs for them
+    [string]$User     = 'fodor.kristof',
+    [string]$Role     = $User,
     [string]$SshHost  = 'localhost',
     [int]   $Port     = 2222,
     # Certificate lifetime, e.g. 5m or 30m (capped by the role's max_ttl)

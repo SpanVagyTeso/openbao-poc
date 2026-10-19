@@ -30,9 +30,13 @@ provider "gitlab" {
   headers  = { Sudo = data.gitlab_user.fodor.username }
 }
 
-# Demo users are created by seed.rb, because their password is shorter than GitLab's minimum
+# Demo users are created by seed.rb, because the API rejects their password as too weak
 data "gitlab_user" "fodor" {
   username = "fodor.kristof"
+}
+
+data "gitlab_user" "other" {
+  username = "other-user"
 }
 
 data "gitlab_user" "unknown" {
@@ -65,10 +69,11 @@ resource "gitlab_project" "hello_world" {
   default_branch         = "main"
 }
 
-# Both users get the same GitLab permissions; only OpenBao decides who may get an SSH certificate
+# All users get the same GitLab permissions; only OpenBao decides who may get which SSH certificate
 resource "gitlab_project_membership" "demo" {
   for_each = {
     fodor   = data.gitlab_user.fodor.id
+    other   = data.gitlab_user.other.id
     unknown = data.gitlab_user.unknown.id
   }
 
