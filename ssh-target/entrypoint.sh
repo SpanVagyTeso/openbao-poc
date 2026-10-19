@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-CA_FILE=/etc/ssh/trusted-user-ca-keys.pem
+CA_FILE=/etc/ssh/trusted-user-ca-keys.pub
 
 # Fetch the CA public key (unauthenticated endpoint) from OpenBao
 echo "Fetching SSH CA public key from ${BAO_ADDR}/v1/${SSH_CA_MOUNT}/public_key"
