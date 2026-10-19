@@ -67,8 +67,6 @@ Oracle Linux sshd that only accepts certificates signed by the OpenBao CA. There
   .\connect.ps1 -ResetHostKey         # after ssh-target was recreated
   ```
 
-- **Connect from a container:** `docker compose run --rm ssh-client` (as fodor.kristof), or
-  `docker compose run --rm -e SSH_USER=other-user -e SSH_ROLE=other-user ssh-client`
 - **Logs:** `docker compose logs -f ssh-target` (sshd logs, including the certificate key ID and serial)
 
 ## GitLab
