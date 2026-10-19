@@ -89,6 +89,10 @@ resource "gitlab_repository_file" "gitlab_ci" {
   content        = file("${path.module}/hello-world/.gitlab-ci.yml")
   commit_message = "Add SSH certificate pipeline"
 
+  # Stacks created before the demo users existed already have this file, but fodor.kristof can't see it
+  # during refresh (not a member yet), so tofu plans a create; update the existing file instead of failing
+  overwrite_on_create = true
+
   depends_on = [gitlab_project_membership.demo]
 }
 
